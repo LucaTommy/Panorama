@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Video → Panorama</title>
+<style>
+  :root {
+    --bg: #0e1117;
+    --panel: #161b22;
+    --panel-2: #1f2630;
+    --border: #2a313c;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #2f81f7;
+    --accent-2: #1f6feb;
+    --good: #2ea043;
+    --bad:  #f85149;
+    --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 28px 32px 12px; }
+  h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+  .subtitle { color: var(--muted); font-size: 14px; }
+  main { max-width: 920px; margin: 0 auto; padding: 16px 24px 64px; }
+
+  .api-row { display: flex; gap: 8px; align-items: center; margin: 16px 0 24px; }
+  .api-row label { color: var(--muted); font-size: 13px; }
+  .api-row input { flex: 1; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font: inherit; }
+
+  #drop {
+    border: 2px dashed var(--border); border-radius: 12px;
+    background: var(--panel); padding: 56px 24px; text-align: center;
+    transition: border-color .15s, background .15s; cursor: pointer;
+  }
+  #drop.hover { border-color: var(--accent); background: var(--panel-2); }
+  #drop p { margin: 4px 0; }
+  #drop .hint { color: var(--muted); font-size: 13px; }
+  #drop input[type=file] { display: none; }
+
+  .status { margin-top: 24px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; }
+  .status-head { display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .status-head .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px;
+    font-weight: 600; background: var(--panel-2); color: var(--muted); }
+  .status-head .pill.queued  { color: var(--muted); }
+  .status-head .pill.running { color: var(--warn); }
+  .status-head .pill.done    { color: var(--good); }
+  .status-head .pill.error   { color: var(--bad); }
+  .status-head .file { color: var(--muted); font-size: 13px; }
+
+  .progress { height: 4px; background: var(--panel-2); position: relative; overflow: hidden; }
+  .progress > span { position: absolute; inset: 0; transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: indet 1.4s infinite linear; }
+  .progress.idle > span { animation: none; }
+  @keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+  pre.log { margin: 0; padding: 14px 18px; max-height: 320px; overflow: auto;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 12.5px; line-height: 1.5; color: var(--muted);
+    background: #0b0f14; }
+
+  .result { display: none; margin-top: 24px; }
+  .result.visible { display: block; }
+  .result figure { margin: 0; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px; }
+  .result img { width: 100%; height: auto; display: block; border-radius: 6px; }
+  .result figcaption { display: flex; justify-content: space-between; align-items: center;
+    color: var(--muted); font-size: 13px; padding: 10px 4px 2px; }
+  .btn { display: inline-block; padding: 8px 14px; border-radius: 6px;
+    background: var(--accent); color: white; text-decoration: none; font-weight: 600;
+    border: 1px solid var(--accent-2); font-size: 13px; cursor: pointer; }
+  .btn:hover { background: var(--accent-2); }
+  .err { color: var(--bad); padding: 10px 18px; font-family: ui-monospace, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Video → Panorama</h1>
+  <div class="subtitle">Drop a horizontal panning video. The pipeline filters blur and duplicates, then stitches the kept frames into a single panoramic image.</div>
+</header>
+
+<main>
+  <div class="api-row">
+    <label for="api">API base URL</label>
+    <input id="api" type="text" placeholder="https://your-backend.example.com" />
+  </div>
+
+  <label id="drop" for="file">
+    <p><strong>Drag &amp; drop a video here</strong></p>
+    <p class="hint">or click to choose a file — .mp4, .mov, .mkv, .webm — up to 1 GB</p>
+    <p class="hint">Long clips (5–10 min) are supported; processing may take several minutes.</p>
+    <input id="file" type="file" accept="video/*" />
+  </label>
+
+  <section class="status" id="status" style="display:none">
+    <div class="status-head">
+      <span class="pill" id="pill">queued</span>
+      <span class="file" id="filename"></span>
+    </div>
+    <div class="progress" id="progress"><span></span></div>
+    <pre class="log" id="log"></pre>
+    <div class="err" id="err" style="display:none"></div>
+  </section>
+
+  <section class="result" id="result">
+    <figure>
+      <img id="resultImg" alt="Panorama result" />
+      <figcaption>
+        <span id="resultMeta"></span>
+        <a id="downloadBtn" class="btn" download="panorama.jpg">Download JPG</a>
+      </figcaption>
+    </figure>
+  </section>
+</main>
+
+<script>
+(() => {
+  const apiInput  = document.getElementById('api');
+  const drop      = document.getElementById('drop');
+  const fileInput = document.getElementById('file');
+  const statusBox = document.getElementById('status');
+  const pill      = document.getElementById('pill');
+  const fileLabel = document.getElementById('filename');
+  const progress  = document.getElementById('progress');
+  const logBox    = document.getElementById('log');
+  const errBox    = document.getElementById('err');
+  const resultBox = document.getElementById('result');
+  const resultImg = document.getElementById('resultImg');
+  const resultMeta= document.getElementById('resultMeta');
+  const dlBtn     = document.getElementById('downloadBtn');
+
+  // Default API base: same origin if backend serves the page, else from localStorage.
+  const stored = localStorage.getItem('panorama_api');
+  apiInput.value = stored || (location.origin && !location.origin.startsWith('file:') ? location.origin : '');
+  apiInput.addEventListener('change', () => localStorage.setItem('panorama_api', apiInput.value.trim()));
+
+  function apiBase() {
+    return (apiInput.value || '').trim().replace(/\/+$/, '');
+  }
+
+  ;['dragenter','dragover'].forEach(ev =>
+    drop.addEventListener(ev, e => { e.preventDefault(); if (!busy) drop.classList.add('hover'); }));
+  ;['dragleave','drop'].forEach(ev =>
+    drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hover'); }));
+  drop.addEventListener('drop', e => {
+    if (!busy && e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => {
+    if (!busy && fileInput.files[0]) handleFile(fileInput.files[0]);
+  });
+
+  let busy = false;
+
+  function setBusy(b) {
+    busy = b;
+    drop.style.opacity = b ? '0.5' : '1';
+    drop.style.pointerEvents = b ? 'none' : 'auto';
+  }
+
+  function setStatus(s) {
+    pill.textContent = s;
+    pill.className = 'pill ' + s;
+    progress.classList.toggle('idle', s !== 'running' && s !== 'queued');
+  }
+
+  async function handleFile(file) {
+    if (!apiBase()) {
+      alert('Set the API base URL first (your backend on Render/Railway/Fly).');
+      return;
+    }
+    setBusy(true);
+    resultBox.classList.remove('visible');
+    errBox.style.display = 'none';
+    errBox.textContent = '';
+    logBox.textContent = '';
+    statusBox.style.display = 'block';
+    fileLabel.textContent = `${file.name} — ${(file.size/1024/1024).toFixed(1)} MB`;
+    setStatus('queued');
+
+    const fd = new FormData();
+    fd.append('file', file);
+
+    let jobId;
+    try {
+      const r = await fetch(`${apiBase()}/api/jobs`, { method: 'POST', body: fd });
+      if (!r.ok) throw new Error(`Upload failed: HTTP ${r.status} ${await r.text()}`);
+      const j = await r.json();
+      jobId = j.job_id;
+    } catch (e) {
+      setStatus('error');
+      errBox.style.display = 'block';
+      errBox.textContent = e.message;
+      setBusy(false);
+      return;
+    }
+
+    pollJob(jobId);
+  }
+
+  async function pollJob(jobId) {
+    setStatus('running');
+    while (true) {
+      let j;
+      try {
+        const r = await fetch(`${apiBase()}/api/jobs/${jobId}`);
+        if (!r.ok) throw new Error(`Status fetch failed: HTTP ${r.status}`);
+        j = await r.json();
+      } catch (e) {
+        setStatus('error');
+        errBox.style.display = 'block';
+        errBox.textContent = e.message;
+        return;
+      }
+      logBox.textContent = (j.log_tail || []).join('\n');
+      logBox.scrollTop = logBox.scrollHeight;
+      setStatus(j.status);
+
+      if (j.status === 'done') {
+        const url = `${apiBase()}/api/jobs/${jobId}/result?ts=${Date.now()}`;
+        resultImg.src = url;
+        dlBtn.href = url;
+        const r = j.result || {};
+        resultMeta.textContent =
+          `${r.width || '?'} × ${r.height || '?'} px — ${r.size_mb ?? '?'} MB` +
+          (r.verified === false ? '  ⚠ verification warnings' : '');
+        resultBox.classList.add('visible');
+        setBusy(false);
+        return;
+      }
+      if (j.status === 'error') {
+        errBox.style.display = 'block';
+        errBox.textContent = j.error || 'Pipeline failed';
+        setBusy(false);
+        return;
+      }
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+})();
+</script>
+</body>
+</html>

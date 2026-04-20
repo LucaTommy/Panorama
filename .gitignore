@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+jobs/
+panorama_output.jpg
+panorama_output.png
+*.egg-info/
+.env

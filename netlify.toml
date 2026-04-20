@@ -1,0 +1,8 @@
+[build]
+  publish = "web"
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://YOUR-BACKEND-HOST.example.com/api/:splat"
+  status = 200
+  force = true
